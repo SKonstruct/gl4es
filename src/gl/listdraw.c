@@ -300,11 +300,35 @@ int fill_lineIndices(modeinit_t *modes, int length, GLenum mode, GLushort* indic
                 case GL_TRIANGLE_FAN:
                 case GL_TRIANGLES:
                     if(len>2) {
-                        // 1 triangle -> 3 lines => 6 half-lines !
-                        for (; i<len-2; i+=3) {
-                            ind_line[k++] = ind(i+0); ind_line[k++] = ind(i+1);
-                            ind_line[k++] = ind(i+1); ind_line[k++] = ind(i+2);
-                            ind_line[k++] = ind(i+2); ind_line[k++] = ind(i+0);
+                        // Prevent inner diagonals from rendering on outlines rendered this way
+                        const int LINEWF_BOUNDARY_MAX = 96; // indices in this group
+                        if(len <= LINEWF_BOUNDARY_MAX) {
+                            int e0 = k;
+                            for (; i<len-2; i+=3) {
+                                GLushort tri[3] = { (GLushort)(ind(i+0)), (GLushort)(ind(i+1)), (GLushort)(ind(i+2)) };
+                                for(int e=0; e<3; e++) {
+                                    GLushort a = tri[e], b = tri[(e+1)%3];
+                                    int found = -1;
+                                    for(int s=e0; s<k; s+=2) {
+                                        if((ind_line[s]==a && ind_line[s+1]==b) ||
+                                           (ind_line[s]==b && ind_line[s+1]==a)) { found=s; break; }
+                                    }
+                                    if(found>=0) {           // interior edge: drop it
+                                        ind_line[found]   = ind_line[k-2];
+                                        ind_line[found+1] = ind_line[k-1];
+                                        k -= 2;
+                                    } else {                 // new edge: keep for now
+                                        ind_line[k++] = a; ind_line[k++] = b;
+                                    }
+                                }
+                            }
+                        } else {
+                            // 1 triangle -> 3 lines => 6 half-lines !
+                            for (; i<len-2; i+=3) {
+                                ind_line[k++] = ind(i+0); ind_line[k++] = ind(i+1);
+                                ind_line[k++] = ind(i+1); ind_line[k++] = ind(i+2);
+                                ind_line[k++] = ind(i+2); ind_line[k++] = ind(i+0);
+                            }
                         }
                     }
                     break;
