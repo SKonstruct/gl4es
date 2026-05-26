@@ -1341,9 +1341,31 @@ const char* const* fpe_FragmentShader(shaderconv_need_t* need, fpe_state_t *stat
             ShadAppend("discard;\n"); // Never pass...
         } else {
             // FPE_LESS FPE_EQUAL FPE_LEQUAL FPE_GREATER FPE_NOTEQUAL FPE_GEQUAL
-            // but need to negate the operator
-            const char* alpha_test_op[] = {">=","!=",">","<=","==","<"}; 
-            sprintf(buff, "if (floor(fColor.a*255.) %s _gl4es_AlphaRef) discard;\n", alpha_test_op[alpha_func-FPE_LESS]);
+            // Discard condition (the keep predicate negated). The original codegen used
+            // `floor(a*255.) <op> ref` which forces fragments into exact integer bins. That
+            // makes GL_EQUAL/GL_NOTEQUAL catastrophically brittle to fp wobble — values near
+            // a bin boundary flip between keep/discard depending on the GPU's fp implementation
+            // (observed: PVR fp16 mediump speckled in SK foliage where Adreno fp32 mediump
+            // rendered cleanly). Use continuous comparisons against ref directly; for the
+            // bin-style predicates GL_EQUAL/GL_NOTEQUAL use a ±0.5/255 tolerant window so any
+            // value within half a bin of ref still counts as "equal" — matching the intent
+            // of `glAlphaFunc(GL_EQUAL, ref/255)` without the integer-quantization fragility.
+            switch (alpha_func) {
+                case FPE_LESS:    // keep: a < ref/255 → discard: a >= ref/255
+                    sprintf(buff, "if (fColor.a*255. >= _gl4es_AlphaRef) discard;\n"); break;
+                case FPE_LEQUAL:  // keep: a <= ref/255 → discard: a > ref/255
+                    sprintf(buff, "if (fColor.a*255. >  _gl4es_AlphaRef) discard;\n"); break;
+                case FPE_GREATER: // keep: a > ref/255 → discard: a <= ref/255
+                    sprintf(buff, "if (fColor.a*255. <= _gl4es_AlphaRef) discard;\n"); break;
+                case FPE_GEQUAL:  // keep: a >= ref/255 → discard: a < ref/255
+                    sprintf(buff, "if (fColor.a*255. <  _gl4es_AlphaRef) discard;\n"); break;
+                case FPE_EQUAL:   // keep: within ±0.5 of ref → discard: outside that window
+                    sprintf(buff, "if (abs(fColor.a*255. - _gl4es_AlphaRef) >= 0.5) discard;\n"); break;
+                case FPE_NOTEQUAL: // keep: outside ±0.5 of ref → discard: within window
+                    sprintf(buff, "if (abs(fColor.a*255. - _gl4es_AlphaRef) <  0.5) discard;\n"); break;
+                default:
+                    sprintf(buff, "// unknown alpha_func %d\n", alpha_func); break;
+            }
             ShadAppend(buff);
         }
     }
@@ -1786,10 +1808,26 @@ const char* const* fpe_CustomFragmentShader(const char* initial, fpe_state_t* st
             } else if (alpha_func==FPE_NEVER) {
                 ShadAppend("discard;\n"); // Never pass...
             } else {
-                // FPE_LESS FPE_EQUAL FPE_LEQUAL FPE_GREATER FPE_NOTEQUAL FPE_GEQUAL
-                // but need to negate the operator
-                const char* alpha_test_op[] = {">=","!=",">","<=","==","<"}; 
-                sprintf(buff, " if (floor(%s.a*255.) %s _gl4es_AlphaRef) discard;\n", is_fragcolor?"_gl4es_FragColor":"gl_FragData[0]", alpha_test_op[alpha_func-FPE_LESS]);
+                // See note at the other alpha-test codegen site: use continuous comparisons
+                // against ref, with a ±0.5 tolerance window for the GL_EQUAL/GL_NOTEQUAL cases
+                // to avoid fp-bin fragility (PVR fp16 mediump speckle).
+                const char* frg = is_fragcolor?"_gl4es_FragColor":"gl_FragData[0]";
+                switch (alpha_func) {
+                    case FPE_LESS:
+                        sprintf(buff, " if (%s.a*255. >= _gl4es_AlphaRef) discard;\n", frg); break;
+                    case FPE_LEQUAL:
+                        sprintf(buff, " if (%s.a*255. >  _gl4es_AlphaRef) discard;\n", frg); break;
+                    case FPE_GREATER:
+                        sprintf(buff, " if (%s.a*255. <= _gl4es_AlphaRef) discard;\n", frg); break;
+                    case FPE_GEQUAL:
+                        sprintf(buff, " if (%s.a*255. <  _gl4es_AlphaRef) discard;\n", frg); break;
+                    case FPE_EQUAL:
+                        sprintf(buff, " if (abs(%s.a*255. - _gl4es_AlphaRef) >= 0.5) discard;\n", frg); break;
+                    case FPE_NOTEQUAL:
+                        sprintf(buff, " if (abs(%s.a*255. - _gl4es_AlphaRef) <  0.5) discard;\n", frg); break;
+                    default:
+                        sprintf(buff, " // unknown alpha_func %d\n", alpha_func); break;
+                }
                 ShadAppend(buff);
             }
         }
