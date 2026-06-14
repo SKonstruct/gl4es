@@ -214,9 +214,11 @@ void* APIENTRY_GL4ES proc_address(void *lib, const char *name) {
     void *emscripten_GetProcAddress(const char *name);
     return emscripten_GetProcAddress(name);
 #elif defined __APPLE__
-    // apple code seems to use RTLD_NEXT which is usually ((void*)-1)
-    // remove if it not needed
-    return dlsym((void*)(~(uintptr_t)0), name);
+    static void* handle = NULL;
+    if (!handle) {
+        handle = dlopen("/System/Library/Frameworks/OpenGLES.framework/OpenGLES", RTLD_LAZY | RTLD_GLOBAL);
+    }
+    return dlsym(handle ? handle : RTLD_DEFAULT, name);
 #elif !defined NO_LOADER
     return dlsym(lib, name);
 #else
