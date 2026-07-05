@@ -426,6 +426,13 @@ void* NewGLState(void* shared_glstate, int es2only) {
         if(globals4es.recyclefbo) {
             glstate->fbo.old = (oldfbos_t*)calloc(1, sizeof(oldfbos_t));
         }
+
+        // Detect and use the host-bound FBO as the default framebuffer target
+        GLint current_fbo = 0;
+        gles_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &current_fbo);
+        glstate->fbo.mainfbo_fbo = current_fbo;
+        printf("[gl4es] detected default FBO binding: %d\n", current_fbo);
+        fflush(stdout);
     }
     glstate->fbo.current_fb = glstate->fbo.fbo_0;
     glstate->fbo.current_rb = glstate->fbo.default_rb;

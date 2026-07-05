@@ -256,6 +256,9 @@ void APIENTRY_GL4ES gl4es_glGetAttachedShaders(GLuint program, GLsizei maxCount,
 }
 
 GLint APIENTRY_GL4ES gl4es_glGetAttribLocation(GLuint program, const GLchar *name) {
+    if (!name) {
+        return -1;
+    }
     DBG(printf("glGetAttribLocation(%d, %s)\n", program, name));
     FLUSH_BEGINEND;
     CHECK_PROGRAM(GLint, program);
@@ -439,6 +442,9 @@ void APIENTRY_GL4ES gl4es_glGetProgramiv(GLuint program, GLenum pname, GLint *pa
 }
 
 GLint APIENTRY_GL4ES gl4es_glGetUniformLocation(GLuint program, const GLchar *name) {
+    if (!name) {
+        return -1;
+    }
     DBG(printf("glGetUniformLocation(%d, %s)\n", program, name);)
     FLUSH_BEGINEND;
     CHECK_PROGRAM(GLint, program)
