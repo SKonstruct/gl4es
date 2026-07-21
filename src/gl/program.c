@@ -1,5 +1,8 @@
 #include "program.h"
 
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../glx/hardext.h"
@@ -22,6 +25,28 @@
 KHASH_MAP_IMPL_INT(attribloclist, attribloc_t *);
 KHASH_MAP_IMPL_INT(uniformlist, uniform_t *);
 KHASH_MAP_IMPL_INT(programlist, program_t *);
+
+static pthread_mutex_t program_thread_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t program_thread_id;
+static uint64_t warned_program_thread_id;
+
+static void check_program_thread(const char *function)
+{
+    uint64_t thread_id;
+    pthread_threadid_np(NULL, &thread_id);
+
+    pthread_mutex_lock(&program_thread_lock);
+    if (!program_thread_id) {
+        program_thread_id = thread_id;
+        fprintf(stderr, "LIBGL: program API owner thread %llu (%s)\n",
+            (unsigned long long)thread_id, function);
+    } else if (program_thread_id != thread_id && warned_program_thread_id != thread_id) {
+        warned_program_thread_id = thread_id;
+        fprintf(stderr, "LIBGL: warning: program API reached from thread %llu (%s); owner is %llu\n",
+            (unsigned long long)thread_id, function, (unsigned long long)program_thread_id);
+    }
+    pthread_mutex_unlock(&program_thread_lock);
+}
 
 
 void APIENTRY_GL4ES gl4es_glAttachShader(GLuint program, GLuint shader) {
@@ -53,6 +78,7 @@ void APIENTRY_GL4ES gl4es_glAttachShader(GLuint program, GLuint shader) {
 }
 
 void APIENTRY_GL4ES gl4es_glBindAttribLocation(GLuint program, GLuint index, const GLchar *name) {
+    check_program_thread("glBindAttribLocation");
     DBG(printf("glBindAttribLocation(%d, %d, \"%s\")\n", program, index, name);)
     FLUSH_BEGINEND;
     // sanity tests
@@ -88,6 +114,7 @@ void APIENTRY_GL4ES gl4es_glBindAttribLocation(GLuint program, GLuint index, con
 }
 
 GLuint APIENTRY_GL4ES gl4es_glCreateProgram(void) {
+    check_program_thread("glCreateProgram");
     DBG(printf("glCreateProgram()\n");)
     FLUSH_BEGINEND;
     static GLuint lastprogram = 0;
@@ -734,6 +761,7 @@ void APIENTRY_GL4ES gl4es_glProgramBinary(GLuint program, GLenum binaryFormat, c
 }
 
 void APIENTRY_GL4ES gl4es_glLinkProgram(GLuint program) {
+    check_program_thread("glLinkProgram");
     DBG(printf("glLinkProgram(%d)\n", program);)
     FLUSH_BEGINEND;
     CHECK_PROGRAM(void, program)
@@ -815,6 +843,7 @@ void APIENTRY_GL4ES gl4es_glLinkProgram(GLuint program) {
 }
 
 void APIENTRY_GL4ES gl4es_glUseProgram(GLuint program) {
+    check_program_thread("glUseProgram");
     DBG(printf("glUseProgram(%d) old=%d\n", program, glstate->glsl->program);)
     PUSH_IF_COMPILING(glUseProgram);
     if(program==0) {
