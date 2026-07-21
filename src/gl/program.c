@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <sys/syscall.h>
+#endif
 #include "../glx/hardext.h"
 #include "debug.h"
 #include "fpe.h"
@@ -30,10 +34,26 @@ static pthread_mutex_t program_thread_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t program_thread_id;
 static uint64_t warned_program_thread_id;
 
+// pthread_threadid_np is Apple-only; use each platform's native thread-id call
+// so this diagnostic builds on Android (Bionic) and Linux too.
+static uint64_t current_thread_id(void)
+{
+#if defined(__APPLE__)
+    uint64_t thread_id = 0;
+    pthread_threadid_np(NULL, &thread_id);
+    return thread_id;
+#elif defined(__ANDROID__)
+    return (uint64_t)pthread_gettid_np(pthread_self());
+#elif defined(__linux__)
+    return (uint64_t)syscall(SYS_gettid);
+#else
+    return (uint64_t)(uintptr_t)pthread_self();
+#endif
+}
+
 static void check_program_thread(const char *function)
 {
-    uint64_t thread_id;
-    pthread_threadid_np(NULL, &thread_id);
+    uint64_t thread_id = current_thread_id();
 
     pthread_mutex_lock(&program_thread_lock);
     if (!program_thread_id) {
