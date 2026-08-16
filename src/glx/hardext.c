@@ -1,6 +1,7 @@
 #include "hardext.h"
 
 #include "../gl/debug.h"
+#include "../gl/envvars.h"
 #include "../gl/gl4es.h"
 #include "../gl/init.h"
 #include "../gl/logs.h"
@@ -326,6 +327,22 @@ void GetHardwareExtensions(int notest)
     S("GL_OES_packed_depth_stencil ", depthstencil, 1);
     S("GL_OES_depth24 ", depth24, 1);
     S("GL_OES_rgb8_rgba8 ", rgba8, 1);
+    // These three are *core* in GLES 3.0, so an ES3 driver does not advertise the
+    // ES2-era OES strings above and the checks miss. Leaving them at 0 makes
+    // glRenderbufferStorage split GL_DEPTH24_STENCIL8 into DEPTH_COMPONENT16 + a
+    // separate STENCIL_INDEX8 (rejected as GL_FRAMEBUFFER_UNSUPPORTED by drivers that
+    // require packed depth-stencil, e.g. Apple), and downgrade RGB8/RGBA8 render
+    // targets to RGB565/RGBA4. Probe the real context version and re-enable them.
+    // Gated on the version string, not forced, so a genuine ES2 context still works.
+    if(!IsEnvVarTrue("LIBGL_NOES3CORE")) {
+        const char *ver = (const char *) gles_glGetString(GL_VERSION);
+        if(ver && strstr(ver, "OpenGL ES 3")) {
+            hardext.depthstencil = 1;
+            hardext.depth24 = 1;
+            hardext.rgba8 = 1;
+            SHUT_LOGD("GLES 3 context detected, packed depth-stencil / depth24 / rgb8-rgba8 forced\n");
+        }
+    }
     S("GL_EXT_multi_draw_arrays ", multidraw, 0);
     if(!globals4es.nobgra) {
         S("GL_EXT_texture_format_BGRA8888 ", bgra8888, 1);

@@ -1008,7 +1008,9 @@ void APIENTRY_GL4ES gl4es_glRenderbufferStorage(GLenum target, GLenum internalfo
     else if (internalformat == GL_RGB4)
         internalformat = GL_RGBA4_OES;
     else if (internalformat == GL_RGBA) {
-        if(hardext.rgba8==0)
+        // was inverted: it picked RGBA8 precisely when the driver lacked it, and
+        // downgraded to RGBA4 when it was supported.
+        if(hardext.rgba8)
             internalformat = GL_RGBA8;
         else
             internalformat = GL_RGBA4_OES;
