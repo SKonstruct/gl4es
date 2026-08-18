@@ -54,6 +54,8 @@ void readfboEnd();
 GLuint gl4es_getCurrentFBO();
 void gl4es_setCurrentFBO();
 
+void detachDeletedTexture(GLuint texture);
+
 void gl4es_saveCurrentFBO();
 void gl4es_restoreCurrentFBO();
 

@@ -384,7 +384,18 @@ void APIENTRY_GL4ES fpe_program(int ispoint) {
         glstate->fpe = fpe_GetCache(glstate->fpe_cache, &state, 1);
     }   
     if(glstate->fpe->glprogram==NULL) {
+        // DIAGNOSTIC (temporary): the FPE cache is unbounded and its GL objects are
+        // never freed -- every distinct fixed-function state costs 1 program + 2
+        // shaders for the life of the context. On iOS the driver has been seen to
+        // fault *inside* glCreateShader after a scene change. Count creations and
+        // report any 0 handle, so a crash log shows how many objects were live.
+        static int fpe_created = 0;
+        ++fpe_created;
         glstate->fpe->prog = gl4es_glCreateProgram();
+        if(glstate->fpe->prog == 0)
+            printf("LIBGL: FPE glCreateProgram returned 0 (fpe program #%d)\n", fpe_created);
+        if((fpe_created % 32) == 0)
+            printf("LIBGL: FPE programs created so far: %d\n", fpe_created);
         DBG(int from_psa = 1;)
         if(fpe_GetProgramPSA(glstate->fpe->prog, &state)==0) {
             DBG(from_psa = 0;)
@@ -396,6 +407,8 @@ void APIENTRY_GL4ES fpe_program(int ispoint) {
                 GLint status;
                 // no old program, using regular FPE
                 glstate->fpe->vert = gl4es_glCreateShader(GL_VERTEX_SHADER);
+                if(glstate->fpe->vert == 0)
+                    printf("LIBGL: FPE glCreateShader(VERTEX) returned 0 (fpe program #%d)\n", fpe_created);
                 gl4es_glShaderSource(glstate->fpe->vert, 1, fpe_VertexShader(NULL, glstate->fpe_state), NULL);
                 gl4es_glCompileShader(glstate->fpe->vert);
                 gl4es_glGetShaderiv(glstate->fpe->vert, GL_COMPILE_STATUS, &status);
@@ -408,6 +421,8 @@ void APIENTRY_GL4ES fpe_program(int ispoint) {
                         printf("LIBGL: FPE Vertex shader compile failed: %s\n", buff);
                 }
                 glstate->fpe->frag = gl4es_glCreateShader(GL_FRAGMENT_SHADER);
+                if(glstate->fpe->frag == 0)
+                    printf("LIBGL: FPE glCreateShader(FRAGMENT) returned 0 (fpe program #%d)\n", fpe_created);
                 gl4es_glShaderSource(glstate->fpe->frag, 1, fpe_FragmentShader(NULL, glstate->fpe_state), NULL);
                 gl4es_glCompileShader(glstate->fpe->frag);
                 gl4es_glGetShaderiv(glstate->fpe->frag, GL_COMPILE_STATUS, &status);

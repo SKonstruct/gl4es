@@ -405,6 +405,7 @@ void APIENTRY_GL4ES gl4es_glDeleteTextures(GLsizei n, const GLuint *textures) {
                     if(tex->renderstencil)
                         gl4es_glDeleteRenderbuffers(1, &tex->renderstencil);
                 }
+                detachDeletedTexture(t);
                 errorGL();
 #ifdef TEXSTREAM
                 if (globals4es.texstream && tex->streamed)

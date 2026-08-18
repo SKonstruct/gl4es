@@ -114,11 +114,41 @@ void APIENTRY_GL4ES gl4es_glGenFramebuffers(GLsizei n, GLuint *ids) {
     }
 }
 
+// A deleted texture leaves its name behind in the attachment record of any FBO it was
+// attached to. GL reuses texture names immediately, so the next glGenTextures can hand
+// that same name to an unrelated texture, which gl4es would then treat as this FBO's
+// attachment -- clobbering the new texture's binded_fbo/binded_attachment. Forget the
+// attachment instead. Scans every FBO because binded_fbo only records the last one.
+void detachDeletedTexture(GLuint texture) {
+    if(!texture || !glstate->fbo.framebufferlist)
+        return;
+    for (khint_t k = kh_begin(glstate->fbo.framebufferlist); k != kh_end(glstate->fbo.framebufferlist); ++k) {
+        if(!kh_exist(glstate->fbo.framebufferlist, k))
+            continue;
+        glframebuffer_t *fb = kh_value(glstate->fbo.framebufferlist, k);
+        if(!fb)
+            continue;
+        for(int j=0; j<MAX_DRAW_BUFFERS; ++j)
+            if(fb->color[j]==texture && fb->t_color[j]!=GL_RENDERBUFFER) {
+                fb->color[j] = 0;
+                fb->t_color[j] = GL_NONE;
+            }
+        if(fb->depth==texture && fb->t_depth!=GL_RENDERBUFFER) {
+            fb->depth = 0;
+            fb->t_depth = GL_NONE;
+        }
+        if(fb->stencil==texture && fb->t_stencil!=GL_RENDERBUFFER) {
+            fb->stencil = 0;
+            fb->t_stencil = GL_NONE;
+        }
+    }
+}
+
 void APIENTRY_GL4ES gl4es_glDeleteFramebuffers(GLsizei n, GLuint *framebuffers) {
     DBG(printf("glDeleteFramebuffers(%i, %p), framebuffers[0]=%u\n", n, framebuffers, framebuffers[0]);)
     // delete tracking
     if (glstate->fbo.framebufferlist)
-        for (int i=0; i<n; i++) {
+        {
             khint_t k;
             glframebuffer_t *fb;
             for (int i = 0; i < n; i++) {
