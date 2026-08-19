@@ -340,7 +340,16 @@ void GetHardwareExtensions(int notest)
             hardext.depthstencil = 1;
             hardext.depth24 = 1;
             hardext.rgba8 = 1;
-            SHUT_LOGD("GLES 3 context detected, packed depth-stencil / depth24 / rgb8-rgba8 forced\n");
+            // Same story for these four, with visual rather than framebuffer symptoms:
+            // full NPOT (GL_REPEAT + mipmaps, otherwise NPOT wraps clamp and tile), 32-bit
+            // indices (otherwise every draw is downconverted to 16-bit and geometry past
+            // 65535 vertices scrambles), depth textures and R/RG textures.
+            hardext.npot = 3;
+            hardext.elementuint = 1;
+            if(!globals4es.nodepthtex) hardext.depthtex = 1;
+            hardext.rgtex = 1;
+            SHUT_LOGD("GLES 3 context detected, packed depth-stencil / depth24 / rgb8-rgba8 / "
+                      "full NPOT / uint indices / depth+rg textures forced\n");
         }
     }
     S("GL_EXT_multi_draw_arrays ", multidraw, 0);

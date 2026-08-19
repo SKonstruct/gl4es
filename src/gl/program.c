@@ -240,15 +240,20 @@ void APIENTRY_GL4ES gl4es_glDetachShader(GLuint program, GLuint shader) {
     FLUSH_BEGINEND;
     CHECK_PROGRAM(void, program)
     CHECK_SHADER(void, shader)
-    // is shader attached?
-    int f = 0;
-    while(f<glprogram->attach_size && glprogram->attach[f]!=shader)
-        f++;
-    // if program is linked, don't try anything....
+    // Spec says detaching after a link is legal and the program stays valid, but gl4es
+    // keeps raw shader_t* in glprogram->last_vert/last_frag and never clears them. A real
+    // detach here lets actually_detachshader free the shader while those still point at
+    // it, and fpe.c's custom-shader path then reads last_vert->source -- a use-after-free
+    // on exactly the path SK takes for its ShaderConfig materials. Leaking the shader
+    // object is the lesser bug; do not remove this without also clearing last_vert/frag.
     if(glprogram->linked) {
         noerrorShim();
         return;
     }
+    // is shader attached?
+    int f = 0;
+    while(f<glprogram->attach_size && glprogram->attach[f]!=shader)
+        f++;
     // send to hardware
     LOAD_GLES2(glDetachShader);
     if(gles_glDetachShader) {
@@ -366,9 +371,9 @@ void APIENTRY_GL4ES gl4es_glGetActiveUniform(GLuint program, GLuint index, GLsiz
             if(m->internal_id == index) {
                 if(type) *type = m->type;
                 if(size) *size = m->size;
-                if(length) *length = strlen(m->name);
+                if(length) *length = m->name?strlen(m->name):0;
                 if(bufSize && name) {
-                    strncpy(name, m->name, bufSize-1);
+                    strncpy(name, m->name?m->name:"", bufSize-1);
                     name[bufSize-1] = '\0';
                 }
                 DBG(printf(" found %s (%zd), type=%s, size=%d\n", m->name, strlen(m->name), PrintEnum(m->type), m->size);)
@@ -463,7 +468,7 @@ void APIENTRY_GL4ES gl4es_glGetProgramiv(GLuint program, GLenum pname, GLint *pa
                 int l = 0;
                 uniform_t *m;
                 kh_foreach_value(glprogram->uniform, m,
-                    if(l<strlen(m->name)+1)
+                    if(m->name && l<strlen(m->name)+1)
                         l = strlen(m->name)+1;
                 )
                 *params = l;
@@ -506,7 +511,7 @@ GLint APIENTRY_GL4ES gl4es_glGetUniformLocation(GLuint program, const GLchar *na
     int index = 0;
     int l = strlen(name);
     // get array (only if end with ])
-    if(name[l-1]==']') {
+    if(l && name[l-1]==']') {
         char * p = strrchr(name, '[');
         l = p-name;
         p++;
@@ -517,7 +522,7 @@ GLint APIENTRY_GL4ES gl4es_glGetUniformLocation(GLuint program, const GLchar *na
     if(glprogram->uniform) {
         uniform_t *m;
         kh_foreach_value(glprogram->uniform, m,
-            if(strlen(m->name)==l && strncmp(m->name, name, l)==0) {
+            if(m->name && strlen(m->name)==l && strncmp(m->name, name, l)==0) {
                 res = m->id;
                 if(index>m->size) {
                     res = -1;   // too big !
@@ -551,14 +556,14 @@ static void clear_program(program_t *glprogram)
 {
     // clear all Attrib location cache
     if(glprogram->attribloc) {
-        attribloc_t *m;
-        khint_t k;
         int ret;
         //attribloc->glname must not be freed
-        kh_foreach(glprogram->attribloc, k, m,
+        for (khint_t k = kh_begin(glprogram->attribloc); k != kh_end(glprogram->attribloc); ++k) {
+            if (!kh_exist(glprogram->attribloc, k)) continue;
+            attribloc_t *m = kh_value(glprogram->attribloc, k);
             free(m->name); free(m);
             kh_del(attribloclist, glprogram->attribloc, k);
-        )
+        }
         kh_destroy(attribloclist, glprogram->attribloc);
         khash_t(attribloclist) *attribloc = glprogram->attribloc = kh_init(attribloclist);
         kh_put(attribloclist, attribloc, 1, &ret);
@@ -567,13 +572,14 @@ static void clear_program(program_t *glprogram)
     // clear all Uniform cache
     glprogram->num_uniform = 0;
     if(glprogram->uniform) {
-        uniform_t *m;
-        khint_t k;
-        kh_foreach(glprogram->uniform, k, m,
+        for (khint_t k = kh_begin(glprogram->uniform); k != kh_end(glprogram->uniform); ++k) {
+            if (!kh_exist(glprogram->uniform, k)) continue;
+            uniform_t *m = kh_value(glprogram->uniform, k);
             free(m->name); free(m);
             kh_del(uniformlist, glprogram->uniform, k);
-        )
+        }
     }
+    memset(glprogram->texunits, 0, sizeof(glprogram->texunits));
     glprogram->cache.size = 0;  // reset cache buffer
 }
 
@@ -609,12 +615,20 @@ static void fill_program(program_t *glprogram)
         DBG(if(e2==GL_NO_ERROR))
         {
             // remove any ending "[]" that could be present
-            if(name[strlen(name)-1]==']' && strrchr(name, '[')) (*strrchr(name, '['))='\0';
+            size_t namelen = strlen(name);
+            if(namelen && name[namelen-1]==']' && strrchr(name, '[')) (*strrchr(name, '['))='\0';
             GLint id = gles_glGetUniformLocation(glprogram->id, name);
             if(id!=-1) {
                 for (int j = 0; j<size; j++) {
                     k = kh_put(uniformlist, uniforms, id, &ret);
-                    gluniform = kh_value(uniforms, k) = malloc(sizeof(uniform_t));
+                    if(ret==-1) break;  // kh_put failed: k is kh_end(), writing there is out of bounds
+                    if(ret==0) {
+                        // id already registered (overlapping array locations): reuse the slot
+                        // rather than overwriting the pointer and leaking the old uniform_t.
+                        gluniform = kh_value(uniforms, k);
+                        free(gluniform->name);
+                    } else
+                        gluniform = kh_value(uniforms, k) = malloc(sizeof(uniform_t));
                     memset(gluniform, 0, sizeof(uniform_t));
                     if(j) {
                         gluniform->name = malloc(strlen(name)+1+5);
@@ -629,14 +643,9 @@ static void fill_program(program_t *glprogram)
                     gluniform->cache_size = uniformsize(type)*(size-j);
                     gluniform->builtin = builtin_CheckUniform(glprogram, name, id, size-j);
                     // TextureUnit grabbing...
-                    if(type==GL_SAMPLER_CUBE) {
+                    if((type==GL_SAMPLER_CUBE || type==GL_SAMPLER_2D) && tu_idx<MAX_TEX) {
                         glprogram->texunits[tu_idx].id = id;
-                        glprogram->texunits[tu_idx].type=TU_CUBE;
-                        glprogram->texunits[tu_idx].req_tu = glprogram->texunits[tu_idx].act_tu = 0;
-                        ++tu_idx;
-                    } else if (type==GL_SAMPLER_2D) {
-                        glprogram->texunits[tu_idx].id = id;
-                        glprogram->texunits[tu_idx].type=TU_TEX2D;
+                        glprogram->texunits[tu_idx].type = (type==GL_SAMPLER_CUBE)?TU_CUBE:TU_TEX2D;
                         glprogram->texunits[tu_idx].req_tu = glprogram->texunits[tu_idx].act_tu = 0;
                         ++tu_idx;
                     }
@@ -779,6 +788,7 @@ void APIENTRY_GL4ES gl4es_glProgramBinary(GLuint program, GLenum binaryFormat, c
     else
         errorShim(GL_INVALID_OPERATION);
 }
+
 
 void APIENTRY_GL4ES gl4es_glLinkProgram(GLuint program) {
     check_program_thread("glLinkProgram");

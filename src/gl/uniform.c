@@ -543,11 +543,23 @@ void GoUniformMatrix2fv(program_t *glprogram, GLint location, GLsizei count, GLb
         errorShim(GL_INVALID_OPERATION);
         return;
     }
-    // transpose if needed
+    // transpose if needed. The scratch buffer must hold `count` matrices, not one:
+    // upstream sized it for a single matrix and then let the loop below write count of
+    // them, overflowing it by (count-1) matrices for any transposed array uniform --
+    // SK's skinned meshes push mat4[] bone matrices straight through here.
     GLfloat *v = (GLfloat*)value;
     GLfloat tmp[4];
+    GLfloat *heaptmp = NULL;
     if(transpose) {
-        v = tmp;
+        if(count > 1) {
+            heaptmp = (GLfloat*)malloc(sizeof(GLfloat)*4*count);
+            if(!heaptmp) {
+                errorShim(GL_OUT_OF_MEMORY);
+                return;
+            }
+            v = heaptmp;
+        } else
+            v = tmp;
         for (int n=0; n<count; n++)
             for (int i=0; i<2; i++)
                 for (int j=0; j<2; j++)
@@ -558,6 +570,7 @@ void GoUniformMatrix2fv(program_t *glprogram, GLint location, GLsizei count, GLb
     int rsize = sizeof(GLfloat)*2*2*count;
     if (memcmp((char*)glprogram->cache.cache + m->cache_offs, v, rsize)==0) {
         noerrorShim();
+        free(heaptmp);
         return; // nothing to do, same value already there
     }
     // update uniform
@@ -568,6 +581,7 @@ void GoUniformMatrix2fv(program_t *glprogram, GLint location, GLsizei count, GLb
         errorGL();
     } else
         errorShim(GL_INVALID_OPERATION);    // no GLSL hardware
+    free(heaptmp);
 }
 
 void APIENTRY_GL4ES gl4es_glUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
@@ -609,11 +623,23 @@ void GoUniformMatrix3fv(program_t *glprogram, GLint location, GLsizei count, GLb
         errorShim(GL_INVALID_OPERATION);
         return;
     }
-    // transpose if needed
+    // transpose if needed. The scratch buffer must hold `count` matrices, not one:
+    // upstream sized it for a single matrix and then let the loop below write count of
+    // them, overflowing it by (count-1) matrices for any transposed array uniform --
+    // SK's skinned meshes push mat4[] bone matrices straight through here.
     GLfloat *v = (GLfloat*)value;
     GLfloat tmp[9];
+    GLfloat *heaptmp = NULL;
     if(transpose) {
-        v = tmp;
+        if(count > 1) {
+            heaptmp = (GLfloat*)malloc(sizeof(GLfloat)*9*count);
+            if(!heaptmp) {
+                errorShim(GL_OUT_OF_MEMORY);
+                return;
+            }
+            v = heaptmp;
+        } else
+            v = tmp;
         for (int n=0; n<count; n++)
             for (int i=0; i<3; i++)
                 for (int j=0; j<3; j++)
@@ -624,6 +650,7 @@ void GoUniformMatrix3fv(program_t *glprogram, GLint location, GLsizei count, GLb
     int rsize = sizeof(GLfloat)*3*3*count;
     if (memcmp((char*)glprogram->cache.cache + m->cache_offs, v, rsize)==0) {
         noerrorShim();
+        free(heaptmp);
         return; // nothing to do, same value already there
     }
     // update uniform
@@ -634,6 +661,7 @@ void GoUniformMatrix3fv(program_t *glprogram, GLint location, GLsizei count, GLb
         errorGL();
     } else
         errorShim(GL_INVALID_OPERATION);    // no GLSL hardware
+    free(heaptmp);
 }
 void APIENTRY_GL4ES gl4es_glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     DBG(printf("glUniformMatrix4fv(%d, %d, %d, %p) p=>(%f, %f, %f, %f, %f...)\n", location, count, transpose, value, value[0], value[1], value[2], value[3], value[4]);)
@@ -673,11 +701,23 @@ void GoUniformMatrix4fv(program_t *glprogram, GLint location, GLsizei count, GLb
         errorShim(GL_INVALID_OPERATION);
         return;
     }
-    // transpose if needed
+    // transpose if needed. The scratch buffer must hold `count` matrices, not one:
+    // upstream sized it for a single matrix and then let the loop below write count of
+    // them, overflowing it by (count-1) matrices for any transposed array uniform --
+    // SK's skinned meshes push mat4[] bone matrices straight through here.
     GLfloat *v = (GLfloat*)value;
     GLfloat tmp[16];
+    GLfloat *heaptmp = NULL;
     if(transpose) {
-        v = tmp;
+        if(count > 1) {
+            heaptmp = (GLfloat*)malloc(sizeof(GLfloat)*16*count);
+            if(!heaptmp) {
+                errorShim(GL_OUT_OF_MEMORY);
+                return;
+            }
+            v = heaptmp;
+        } else
+            v = tmp;
         for (int n=0; n<count; n++)
             matrix_transpose(value+n*4*4, v+n*4*4);
 
@@ -686,6 +726,7 @@ void GoUniformMatrix4fv(program_t *glprogram, GLint location, GLsizei count, GLb
     int rsize = sizeof(GLfloat)*4*4*count;
     if (memcmp((char*)glprogram->cache.cache + m->cache_offs, v, rsize)==0) {
         noerrorShim();
+        free(heaptmp);
         return; // nothing to do, same value already there
     }
     // update uniform
@@ -698,6 +739,7 @@ void GoUniformMatrix4fv(program_t *glprogram, GLint location, GLsizei count, GLb
         //printf("No GLES2 function\n");
         errorShim(GL_INVALID_OPERATION);    // no GLSL hardware
     }
+    free(heaptmp);
 }
 
 int GetUniformi(program_t *glprogram, GLint location)
